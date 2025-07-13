@@ -63,14 +63,16 @@ public class Compiler
 	}
 
 
-	private class ParsedLoop : ParsedInstruction
-	{
-		public string condition;
-		public string body;
-		public string instructions;
+        private class ParsedLoop : ParsedInstruction
+        {
+                public string condition;
+                public string body;
+                public string instructions;
+                public string _operator;
+                public Tuple<ParsedVariable, ParsedVariable> operands;
 
-		public ParsedLoop() : base( InstructionTypeEnum.typeLoop ) { }
-	}
+                public ParsedLoop() : base( InstructionTypeEnum.typeLoop ) { }
+        }
 
 
 	private class ParsedIf : ParsedInstruction
@@ -505,8 +507,8 @@ public class Compiler
 			if ( str[i] == '\"' )
 			{
 				i += 1;
-					
-				while ( str[i] != '\"' ) 
+
+				while ( str[i] != '\"' )
 				{
 					i += 1;
 				}
@@ -522,7 +524,7 @@ public class Compiler
 		}
 
 		for ( int i = 0; i < str.Length; i++ )
-		{ 
+		{
 			start:
 
 			if ( i >= str.Length )
@@ -578,7 +580,7 @@ public class Compiler
 
 				if ( i >= str.Length )
 				{
-					break; 
+					break;
 				}
 
 				StringPosition stringPosition = str[i..].Find( "=" );
@@ -610,82 +612,116 @@ public class Compiler
 				goto start;
 			}
 
-			// is it a loop?
-			if ( str[i..].StartsWith( "while" ) )
-			{
-				ParsedLoop parsedLoop = new();
+                        // is it a loop?
+                        if ( str[i..].StartsWith( "while" ) )
+                        {
+                                ParsedLoop parsedLoop = new();
 
-				parsedLoop.condition = str[i..].Between( '(', ')' ).str;
+                                parsedLoop.condition = str[i..].Between( '(', ')' ).str;
 
-				StringPosition stringPosition = str[i..].Between( '{', '}' );
-				parsedLoop.body = stringPosition.str;
+                                StringPosition stringPosition = str[i..].Between( '{', '}' );
+                                parsedLoop.body = stringPosition.str;
 
-				instructions.Add( parsedLoop );
+                                for ( int j = 0; j < operators.Length; j++ )
+                                {
+                                        if ( parsedLoop.condition.Contains( operators[j] ) )
+                                        {
+                                                parsedLoop._operator = operators[j];
+                                                break;
+                                        }
+                                }
 
-				i += stringPosition.Length();
-				goto start;
-			}
+                                if ( variableTable.TryGetValue( str[i..].Between( "(", parsedLoop._operator ).str, out ParsedVariable left ) != true )
+                                {
+                                        return instructions; // ERROR
+                                }
 
-			// is it an if statement?
-			if ( str[i..].StartsWith( "if" ) )
-			{
-				ParsedIf parsedIf = new();
+                                StringPosition secondOperandPosition = str[i..].Between( parsedLoop._operator, ")" );
+                                ParsedVariable right = new();
 
-				parsedIf.condition = str[i..].Between( '(', ')' ).str;
+                                if ( variableTable.TryGetValue( secondOperandPosition.str, out right ) == false )
+                                {
+                                        if ( secondOperandPosition.str.StartsWith( '\"' ) )
+                                        {
+                                                if ( left.dataType != DataTypeEnum.typeString )
+                                                {
+                                                        return instructions; // ERROR
+                                                }
 
-				StringPosition stringPosition = str[i..].Between( '{', '}' );
-				parsedIf.body = stringPosition.str;
+                                                right.dataType = DataTypeEnum.typeString;
+                                                right.dataTypeString = "string";
+                                                right.value = secondOperandPosition.str;
+                                        }
+                                        else
+                                        {
+                                                right.dataType = DataTypeEnum.typeQword;
+                                                right.dataTypeString = "qword";
+                                                right.value = long.Parse( secondOperandPosition.str );
+                                        }
+                                }
 
-				for ( int j = 0; j < parsedIf.condition.Length; j++ )
-				{
-					if ( parsedIf.condition.Contains( operators[i] ) )
-					{
-						parsedIf._operator = operators[i];
-						break;
-					}
-				}
+                                parsedLoop.operands = new( left, right );
 
-				if ( variableTable.TryGetValue( str[i..].Between( "(", parsedIf._operator ).str, out ParsedVariable parsedVariable ) != true )
-				{
-					return instructions; // ERROR
-				}
+                                instructions.Add( parsedLoop );
 
-				StringPosition secondOperandPosition = str[i..].Between( parsedIf._operator, ")" );
-				ParsedVariable parsedVariableTwo = new();
+                                i += stringPosition.Length();
+                                goto start;
+                        }
 
-				if ( variableTable.TryGetValue( secondOperandPosition.str, out parsedVariableTwo ) == false )
-				{
-					if ( secondOperandPosition.str.StartsWith( '\"' ) )
-					{
-						if ( parsedVariable.dataType != DataTypeEnum.typeString )
-						{
-							return instructions; // ERROR
-						}
+                        // is it an if statement?
+                        if ( str[i..].StartsWith( "if" ) )
+                        {
+                                ParsedIf parsedIf = new();
 
-						parsedVariableTwo.dataType = DataTypeEnum.typeString;
-						parsedVariableTwo.dataTypeString = "string";
-						parsedVariableTwo.value = secondOperandPosition.str;
+                                parsedIf.condition = str[i..].Between( '(', ')' ).str;
 
-						parsedIf.operands = new( parsedVariable, parsedVariableTwo );
-					}
-					else
-					{
-						parsedVariableTwo.dataType = DataTypeEnum.typeQword;
-						parsedVariableTwo.dataTypeString = "qword";
-						parsedVariableTwo.value = long.Parse( secondOperandPosition.str );
+                                StringPosition stringPosition = str[i..].Between( '{', '}' );
+                                parsedIf.body = stringPosition.str;
 
-						parsedIf.operands = new( parsedVariable, parsedVariableTwo );
-					}
-				}
-				else
-				{
-					parsedIf.operands = new( parsedVariable, parsedVariableTwo );
-				}
+                                for ( int j = 0; j < operators.Length; j++ )
+                                {
+                                        if ( parsedIf.condition.Contains( operators[j] ) )
+                                        {
+                                                parsedIf._operator = operators[j];
+                                                break;
+                                        }
+                                }
 
-				instructions.Add( parsedIf );
-				i += stringPosition.Length();
-				goto start;
-			}
+                                if ( variableTable.TryGetValue( str[i..].Between( "(", parsedIf._operator ).str, out ParsedVariable parsedVariable ) != true )
+                                {
+                                        return instructions; // ERROR
+                                }
+
+                                StringPosition secondOperandPosition = str[i..].Between( parsedIf._operator, ")" );
+                                ParsedVariable parsedVariableTwo = new();
+
+                                if ( variableTable.TryGetValue( secondOperandPosition.str, out parsedVariableTwo ) == false )
+                                {
+                                        if ( secondOperandPosition.str.StartsWith( '\"' ) )
+                                        {
+                                                if ( parsedVariable.dataType != DataTypeEnum.typeString )
+                                                {
+                                                        return instructions; // ERROR
+                                                }
+
+                                                parsedVariableTwo.dataType = DataTypeEnum.typeString;
+                                                parsedVariableTwo.dataTypeString = "string";
+                                                parsedVariableTwo.value = secondOperandPosition.str;
+                                        }
+                                        else
+                                        {
+                                                parsedVariableTwo.dataType = DataTypeEnum.typeQword;
+                                                parsedVariableTwo.dataTypeString = "qword";
+                                                parsedVariableTwo.value = long.Parse( secondOperandPosition.str );
+                                        }
+                                }
+
+                                parsedIf.operands = new( parsedVariable, parsedVariableTwo );
+
+                                instructions.Add( parsedIf );
+                                i += stringPosition.Length();
+                                goto start;
+                        }
 		}
 
 		return instructions;
@@ -701,15 +737,15 @@ public class Compiler
 
 		for ( int i = 0; i < parsedCall.parameters.Count; i++ )
 		{
-			
+
 			if ( parsedCall.paramDataTypes[i] != parsedCall.function.paramDataTypes[i] )
 			{
 				return parsedCall; // ERROR
 			}
 
 			StringPosition labelPosition = parsedCall.function.instructions.Find
-			( 
-				parsedCall.function.paramLabels[i] 
+			(
+				parsedCall.function.paramLabels[i]
 			);
 
 			if ( labelPosition.Empty() )
@@ -721,8 +757,8 @@ public class Compiler
 			{
 				parsedCall.function.instructions = parsedCall.function.instructions.Remove( labelPosition.startOffset, labelPosition.Length() );
 				parsedCall.function.instructions = parsedCall.function.instructions.Insert
-				( 
-					labelPosition.startOffset, 
+				(
+					labelPosition.startOffset,
 					( string )parsedCall.parameters[i]
 				);
 			}
@@ -730,9 +766,9 @@ public class Compiler
 			{
 				parsedCall.function.instructions = parsedCall.function.instructions.Remove( labelPosition.startOffset, labelPosition.Length() );
 				parsedCall.function.instructions = parsedCall.function.instructions.Insert
-				( 
-					labelPosition.startOffset, 
-					( ( long )parsedCall.parameters[i]).ToString() 
+				(
+					labelPosition.startOffset,
+					( ( long )parsedCall.parameters[i]).ToString()
 				);
 			}
 		}
@@ -743,125 +779,189 @@ public class Compiler
 
 	private static ParsedVariable CompileVariable( ref ParsedVariable parsedVariable )
 	{
-		parsedVariable.instructions = "entry push " + 
-		( 
+		parsedVariable.instructions = "entry push " +
+		(
 			parsedVariable.dataType == DataTypeEnum.typeString ?
-			( ( string )parsedVariable.value ).ToPointer().ToString() : 
-			( long )parsedVariable.value 
+			( ( string )parsedVariable.value ).ToPointer().ToString() :
+			( long )parsedVariable.value
 		) + " ret";
 
 		return parsedVariable;
 	}
 
 
-	private static ParsedIf CompileIf( ref ParsedIf parsedIf )
-	{
-		// fill start with body, jmp 0 if condition true
+        private static ParsedIf CompileIf( ref ParsedIf parsedIf )
+        {
+                string[] compiledBody = Compile( parsedIf.body );
 
-		string[] compiledBody = Compile( parsedIf.body );
+                parsedIf.instructions = "entry mov gra " +
+                (
+                        parsedIf.operands.Item1.dataType == DataTypeEnum.typeString ?
+                        ( ( string )parsedIf.operands.Item1.value ).ToPointer().ToString() :
+                        ( long )parsedIf.operands.Item1.value
+                ) + ' ';
 
-		parsedIf.instructions = "entry mov gra " +
-		(
-			parsedIf.operands.Item1.dataType == DataTypeEnum.typeString ?
-			( ( string )parsedIf.operands.Item1.value ).ToPointer().ToString() :
-			( long )parsedIf.operands.Item1.value
-		) + ' ';
+                string condition = string.Empty;
 
-		switch ( parsedIf._operator )
-		{
-			case "==":
+                switch ( parsedIf._operator )
+                {
+                        case "==":
+                        condition = "cmp gra " +
+                        (
+                                parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedIf.operands.Item2.value ) :
+                                ( long )parsedIf.operands.Item2.value
+                        ) + " fjmp 0 ";
+                        break;
 
-			parsedIf.instructions = parsedIf.instructions.Insert( parsedIf.instructions.Length - 1, "cmp gra " + 
-			(
-				parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
-				( ( string )parsedIf.operands.Item2.value ) :
-				( long )parsedIf.operands.Item2.value
-			) ) + " tjmp 0 ret";
+                        case "!=":
+                        condition = "cmp gra " +
+                        (
+                                parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedIf.operands.Item2.value ) :
+                                ( long )parsedIf.operands.Item2.value
+                        ) + " tjmp 0 ";
+                        break;
 
-			break;
+                        case ">=":
+                        dynamic operandTwo =
+                        (
+                                parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedIf.operands.Item2.value ) :
+                                ( long )parsedIf.operands.Item2.value
+                        );
+                        condition = "cmp gra " + operandTwo + " tjmp 0 greater gra " + operandTwo + " tjmp 0 fjmp 0 ";
+                        break;
 
-			case "!=":
+                        case "<=":
+                        operandTwo =
+                        (
+                                parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedIf.operands.Item2.value ) :
+                                ( long )parsedIf.operands.Item2.value
+                        );
+                        condition = "cmp gra " + operandTwo + " tjmp 0 less gra " + operandTwo + " tjmp 0 fjmp 0 ";
+                        break;
 
-			parsedIf.instructions = parsedIf.instructions.Insert( parsedIf.instructions.Length - 1, "cmp gra " + 
-			(
-				parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
-				( ( string )parsedIf.operands.Item2.value ) :
-				( long )parsedIf.operands.Item2.value
-			) ) + " fjmp 0 ret";
+                        case ">":
+                        operandTwo =
+                        (
+                                parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedIf.operands.Item2.value ) :
+                                ( long )parsedIf.operands.Item2.value
+                        );
+                        condition = "greater gra " + operandTwo + " fjmp 0 ";
+                        break;
 
-			break;
+                        case "<":
+                        operandTwo =
+                        (
+                                parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedIf.operands.Item2.value ) :
+                                ( long )parsedIf.operands.Item2.value
+                        );
+                        condition = "less gra " + operandTwo + " fjmp 0 ";
+                        break;
+                }
 
-			case ">=":
+                parsedIf.instructions += condition;
 
-			dynamic operandTwo =
-			(
-				parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
-				( ( string )parsedIf.operands.Item2.value ) :
-				( long )parsedIf.operands.Item2.value
-			);
+                foreach ( string instr in compiledBody )
+                {
+                        parsedIf.instructions += instr + ' ';
+                }
 
-			parsedIf.instructions = parsedIf.instructions.Insert
-			( 
-				parsedIf.instructions.Length - 1, "cmp gra " +
-				operandTwo + " tjmp 0 greater gra " + operandTwo + " tjmp 0 ret"
-			);
+                parsedIf.instructions += "ret";
 
-			break;
+                return parsedIf;
+        }
 
-			case "<=":
 
-			operandTwo =
-			(
-				parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
-				( (string )parsedIf.operands.Item2.value ) :
-				( long )parsedIf.operands.Item2.value
-			);
+        private static ParsedLoop CompileLoop( ref ParsedLoop parsedLoop )
+        {
+                string[] compiledBody = Compile( parsedLoop.body );
 
-			parsedIf.instructions = parsedIf.instructions.Insert
-			(
-				parsedIf.instructions.Length - 1, "cmp gra " +
-				operandTwo + " tjmp 0 less gra " + operandTwo + " tjmp 0 ret"
-			);
+                parsedLoop.instructions = "entry mov gra " +
+                (
+                        parsedLoop.operands.Item1.dataType == DataTypeEnum.typeString ?
+                        ( ( string )parsedLoop.operands.Item1.value ).ToPointer().ToString() :
+                        ( long )parsedLoop.operands.Item1.value
+                ) + ' ';
 
-			break;
+                string condition = string.Empty;
 
-			case ">":
+                switch ( parsedLoop._operator )
+                {
+                        case "==":
+                        condition = "cmp gra " +
+                        (
+                                parsedLoop.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedLoop.operands.Item2.value ) :
+                                ( long )parsedLoop.operands.Item2.value
+                        ) + " fjmp 0 ";
+                        break;
 
-			operandTwo =
-			(
-				parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
-				( ( string )parsedIf.operands.Item2.value ) :
-				( long )parsedIf.operands.Item2.value
-			);
+                        case "!=":
+                        condition = "cmp gra " +
+                        (
+                                parsedLoop.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedLoop.operands.Item2.value ) :
+                                ( long )parsedLoop.operands.Item2.value
+                        ) + " tjmp 0 ";
+                        break;
 
-			parsedIf.instructions = parsedIf.instructions.Insert
-			(
-				parsedIf.instructions.Length - 1, "greater gra " +
-				operandTwo + " tjmp 0 ret"
-			);
+                        case ">=":
+                        dynamic operandTwo =
+                        (
+                                parsedLoop.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedLoop.operands.Item2.value ) :
+                                ( long )parsedLoop.operands.Item2.value
+                        );
+                        condition = "cmp gra " + operandTwo + " tjmp 0 greater gra " + operandTwo + " tjmp 0 fjmp 0 ";
+                        break;
 
-			break;
+                        case "<=":
+                        operandTwo =
+                        (
+                                parsedLoop.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedLoop.operands.Item2.value ) :
+                                ( long )parsedLoop.operands.Item2.value
+                        );
+                        condition = "cmp gra " + operandTwo + " tjmp 0 less gra " + operandTwo + " tjmp 0 fjmp 0 ";
+                        break;
 
-			case "<":
+                        case ">":
+                        operandTwo =
+                        (
+                                parsedLoop.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedLoop.operands.Item2.value ) :
+                                ( long )parsedLoop.operands.Item2.value
+                        );
+                        condition = "greater gra " + operandTwo + " fjmp 0 ";
+                        break;
 
-			operandTwo =
-			(
-				parsedIf.operands.Item2.dataType == DataTypeEnum.typeString ?
-				( ( string )parsedIf.operands.Item2.value) :
-				( long )parsedIf.operands.Item2.value
-			);
+                        case "<":
+                        operandTwo =
+                        (
+                                parsedLoop.operands.Item2.dataType == DataTypeEnum.typeString ?
+                                ( ( string )parsedLoop.operands.Item2.value ) :
+                                ( long )parsedLoop.operands.Item2.value
+                        );
+                        condition = "less gra " + operandTwo + " fjmp 0 ";
+                        break;
+                }
 
-			parsedIf.instructions = parsedIf.instructions.Insert
-			(
-				parsedIf.instructions.Length - 1, "less gra " +
-				operandTwo + " tjmp 0 ret"
-			);
+                parsedLoop.instructions += condition;
 
-			break;
-		}
+                foreach ( string instr in compiledBody )
+                {
+                        parsedLoop.instructions += instr + ' ';
+                }
 
-		return parsedIf;
-	}
+                parsedLoop.instructions += "jmp 0 ret";
+
+                return parsedLoop;
+        }
 
 
 	public static string[] Compile( string code = null )
@@ -913,13 +1013,19 @@ public class Compiler
 				case InstructionTypeEnum.typeFunction:
 					break;
 
-				case InstructionTypeEnum.typeIf:
-					ParsedIf parsedIf = ( ParsedIf )instruction;
-					CompileIf( ref parsedIf );
-					compiledInstructions.Add( parsedIf.instructions );
-					break;
-			}
-		}
+                                case InstructionTypeEnum.typeIf:
+                                        ParsedIf parsedIf = ( ParsedIf )instruction;
+                                        CompileIf( ref parsedIf );
+                                        compiledInstructions.Add( parsedIf.instructions );
+                                        break;
+
+                                case InstructionTypeEnum.typeLoop:
+                                        ParsedLoop parsedLoop = ( ParsedLoop )instruction;
+                                        CompileLoop( ref parsedLoop );
+                                        compiledInstructions.Add( parsedLoop.instructions );
+                                        break;
+                        }
+                }
 
 		return compiledInstructions.ToArray();
 	}
