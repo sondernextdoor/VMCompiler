@@ -258,10 +258,63 @@ public class Compiler
 	}
 
 
-	private static bool IsLiteral( string str )
-	{
-		return variableTable.TryGetValue( str, out _ ) == false;
-	}
+        private static bool IsLiteral( string str )
+        {
+                return variableTable.TryGetValue( str, out _ ) == false;
+        }
+
+        private static bool TryGetNumericOperand( string token, out long value )
+        {
+                if ( variableTable.TryGetValue( token, out ParsedVariable variable ) )
+                {
+                        if ( variable.dataType == DataTypeEnum.typeQword )
+                        {
+                                value = ( long )variable.value;
+                                return true;
+                        }
+                        value = 0;
+                        return false;
+                }
+
+                return long.TryParse( token.Trim( '\"' ), out value );
+        }
+
+        private static bool TryEvaluateExpression( string expr, out object result, out DataTypeEnum type )
+        {
+                expr = expr.Trim();
+
+                foreach ( string op in new[] { "+", "-", "*", "/" } )
+                {
+                        int idx = expr.IndexOf( op );
+                        if ( idx > 0 )
+                        {
+                                string left = expr[..idx].Trim();
+                                string right = expr[( idx + op.Length )..].Trim();
+
+                                if ( TryGetNumericOperand( left, out long leftVal ) && TryGetNumericOperand( right, out long rightVal ) )
+                                {
+                                        long value = op switch
+                                        {
+                                                "+" => leftVal + rightVal,
+                                                "-" => leftVal - rightVal,
+                                                "*" => leftVal * rightVal,
+                                                "/" => rightVal != 0 ? leftVal / rightVal : 0,
+                                                _ => 0
+                                        };
+
+                                        result = value;
+                                        type = DataTypeEnum.typeQword;
+                                        return true;
+                                }
+
+                                break;
+                        }
+                }
+
+                result = null;
+                type = DataTypeEnum.typeInvalid;
+                return false;
+        }
 
 
 	private static ParsedFunction ParseFunctionParameters( string str, ref ParsedFunction parsedFunction, out int length )
@@ -321,9 +374,7 @@ public class Compiler
 
 	private static ParsedCall ParseCallParameters( string str, ref ParsedCall parsedCall, out int length )
 	{
-		// isExpression? check func table, check for operator signs. todo
-		// Does it match the data type of the function call? todo
-		// Does the func param count match the number of params passed in? todo
+                // supports simple arithmetic expressions and validates parameter types
 
 
 		StringPosition stringPosition = str.Between( '(', ')' );
@@ -338,58 +389,65 @@ public class Compiler
 
 		StringPosition currentParam = stringPosition.str.Insert( 0, "(" ).Between( '(', ',' );
 
-		if ( currentParam.Empty() )
-		{
-			currentParam = stringPosition;
+                if ( currentParam.Empty() )
+                {
+                        currentParam = stringPosition;
 
-			if ( IsLiteral( currentParam.str ) )
-			{
-				if ( currentParam.str.StartsWith( '\"' ) )
-				{
-					parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
-					parsedCall.parameters.Add( currentParam.str );
-				}
-				else
-				{
-					parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
-					parsedCall.parameters.Add( Int64.Parse( currentParam.str ) );
-				}
-			}
-			else
-			{
-				if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
-				{
-					parsedCall.paramDataTypes.Add( parsedVariable.dataType );
-					parsedCall.parameters.Add( parsedVariable.value );
-				}
-			}
+                        if ( TryEvaluateExpression( currentParam.str, out object exprVal, out DataTypeEnum exprType ) )
+                        {
+                                parsedCall.paramDataTypes.Add( exprType );
+                                parsedCall.parameters.Add( exprVal );
+                        }
+                        else if ( IsLiteral( currentParam.str ) )
+                        {
+                                if ( currentParam.str.StartsWith( '\"' ) )
+                                {
+                                        parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
+                                        parsedCall.parameters.Add( currentParam.str );
+                                }
+                                else
+                                {
+                                        parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
+                                        parsedCall.parameters.Add( Int64.Parse( currentParam.str ) );
+                                }
+                        }
+                        else
+                        {
+                                if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
+                                {
+                                        parsedCall.paramDataTypes.Add( parsedVariable.dataType );
+                                        parsedCall.parameters.Add( parsedVariable.value );
+                                }
+                        }
 
-			return parsedCall;
-		}
+                        return parsedCall;
+                }
 
-		int paramLength = 0;
+                int paramLength = 0;
 
-		if ( IsLiteral( currentParam.str ) )
-		{
-			if ( currentParam.str.StartsWith( '\"' ) )
-			{
-				parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
-				parsedCall.parameters.Add( currentParam.str );
-			}
-			else
-			{
-				parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
-				parsedCall.parameters.Add( long.Parse( currentParam.str ) );
-			}
-		}
-		else
-		{
-			if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
-			{
-				parsedCall.paramDataTypes.Add( parsedVariable.dataType );
-				parsedCall.parameters.Add( parsedVariable.value );
-			}
-		}
+                if ( TryEvaluateExpression( currentParam.str, out object exprVal, out DataTypeEnum exprType ) )
+                {
+                        parsedCall.paramDataTypes.Add( exprType );
+                        parsedCall.parameters.Add( exprVal );
+                }
+                else if ( IsLiteral( currentParam.str ) )
+                {
+                        if ( currentParam.str.StartsWith( '\"' ) )
+                        {
+                                parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
+                                parsedCall.parameters.Add( currentParam.str );
+                        }
+                        else
+                        {
+                                parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
+                                parsedCall.parameters.Add( long.Parse( currentParam.str ) );
+                        }
+                }
+                else if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
+                {
+                        parsedCall.paramDataTypes.Add( parsedVariable.dataType );
+                        parsedCall.parameters.Add( parsedVariable.value );
+                }
 
 		for ( int i = 0; i < length; i++ )
 		{
@@ -404,62 +462,83 @@ public class Compiler
 					return parsedCall; // ERROR
 				}
 
-				if ( IsLiteral( currentParam.str ) )
-				{
-					if ( currentParam.str.StartsWith( '\"' ) )
-					{
-						parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
-						parsedCall.parameters.Add( currentParam.str );
-					}
-					else
-					{
-						parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
-						parsedCall.parameters.Add( long.Parse( currentParam.str ) );
-					}
-				}
-				else
-				{
-					if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
-					{
-						parsedCall.paramDataTypes.Add( parsedVariable.dataType );
-						parsedCall.parameters.Add( parsedVariable.value );
-					}
-				}
+                                if ( TryEvaluateExpression( currentParam.str, out object exprVal, out DataTypeEnum exprType ) )
+                                {
+                                        parsedCall.paramDataTypes.Add( exprType );
+                                        parsedCall.parameters.Add( exprVal );
+                                }
+                                else if ( IsLiteral( currentParam.str ) )
+                                {
+                                        if ( currentParam.str.StartsWith( '\"' ) )
+                                        {
+                                                parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
+                                                parsedCall.parameters.Add( currentParam.str );
+                                        }
+                                        else
+                                        {
+                                                parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
+                                                parsedCall.parameters.Add( long.Parse( currentParam.str ) );
+                                        }
+                                }
+                                else if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
+                                {
+                                        parsedCall.paramDataTypes.Add( parsedVariable.dataType );
+                                        parsedCall.parameters.Add( parsedVariable.value );
+                                }
 
 				return parsedCall;
 			}
 
-			if ( IsLiteral( currentParam.str ) )
-			{
-				if ( currentParam.str.StartsWith( '\"' ) )
-				{
-					parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
-					parsedCall.parameters.Add( currentParam.str );
-				}
-				else
-				{
-					parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
-					parsedCall.parameters.Add( long.Parse( currentParam.str ) );
-				}
+                        if ( TryEvaluateExpression( currentParam.str, out object innerExprVal, out DataTypeEnum innerExprType ) )
+                        {
+                                parsedCall.paramDataTypes.Add( innerExprType );
+                                parsedCall.parameters.Add( innerExprVal );
 
-				paramLength = currentParam.Length();
-			}
-			else
-			{
-				if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
-				{
-					parsedCall.paramDataTypes.Add( parsedVariable.dataType );
-					parsedCall.parameters.Add( parsedVariable.value );
+                                paramLength = currentParam.Length();
+                        }
+                        else if ( IsLiteral( currentParam.str ) )
+                        {
+                                if ( currentParam.str.StartsWith( '\"' ) )
+                                {
+                                        parsedCall.paramDataTypes.Add( DataTypeEnum.typeString );
+                                        parsedCall.parameters.Add( currentParam.str );
+                                }
+                                else
+                                {
+                                        parsedCall.paramDataTypes.Add( DataTypeEnum.typeQword );
+                                        parsedCall.parameters.Add( long.Parse( currentParam.str ) );
+                                }
 
-					paramLength = parsedVariable.label.Length;
-				}
-			}
+                                paramLength = currentParam.Length();
+                        }
+                        else if ( variableTable.TryGetValue( currentParam.str, out ParsedVariable parsedVariable ) )
+                        {
+                                parsedCall.paramDataTypes.Add( parsedVariable.dataType );
+                                parsedCall.parameters.Add( parsedVariable.value );
 
-			stringPosition.str = stringPosition.str[paramLength..];
-		}
+                                paramLength = parsedVariable.label.Length;
+                        }
 
-		return parsedCall;
-	}
+                        stringPosition.str = stringPosition.str[paramLength..];
+                }
+
+                if ( parsedCall.paramDataTypes.Count != parsedCall.function.paramDataTypes.Count )
+                {
+                        length = stringPosition.Length();
+                        return parsedCall; // ERROR
+                }
+
+                for ( int i = 0; i < parsedCall.paramDataTypes.Count; i++ )
+                {
+                        if ( parsedCall.paramDataTypes[i] != parsedCall.function.paramDataTypes[i] )
+                        {
+                                length = stringPosition.Length();
+                                return parsedCall; // ERROR
+                        }
+                }
+
+                return parsedCall;
+        }
 
 
 	private static object ParseAssignmentValue( string str, out int length )
