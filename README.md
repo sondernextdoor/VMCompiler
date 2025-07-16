@@ -1,6 +1,6 @@
 # VM Compiler
 
-This project contains an experimental compiler written in C#. The compiler translates a small custom language into instructions for a simple virtual machine. The code is a work in progress and was created around the same time as the author's virtual machine project (2021/2022).
+WIP compiler written in C#. The compiler translates a small custom language into instructions for a simple virtual machine. The code is a work in progress and was created around the same time as the author's virtual machine project (2021/2022).
 
 ## Language overview
 
